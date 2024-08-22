@@ -150,7 +150,7 @@ This is a my learning process of Geospatial Data. In this tutorial, I´m followi
               destfile = here::here("dados", "raster", "srtm_27_17.zip"),
               mode = "wb")
 
-# Realizando mapas de Bioma do Brasil####
+# Realizando mapas de Bioma do Brasil
 
     geo_vetor_amazonia <- geobr::read_amazon(year = 2012, simplified = TRUE, showProgress = TRUE) %>%
       dplyr::
