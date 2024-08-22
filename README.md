@@ -152,30 +152,30 @@ This is a my learning process of Geospatial Data. In this tutorial, I´m followi
 
 # Realizando mapas de Bioma do Brasil####
 
-geo_vetor_amazonia <- geobr::read_amazon(year = 2012, simplified = TRUE, showProgress = TRUE) %>%
-  dplyr::
+    geo_vetor_amazonia <- geobr::read_amazon(year = 2012, simplified = TRUE, showProgress = TRUE) %>%
+      dplyr::
 
-geo_vetor_biomas<- ecodados::geo_vetor_biomas
+    geo_vetor_biomas<- ecodados::geo_vetor_biomas
 
 
 
-plot(geo_vetor_biomas)
+    plot(geo_vetor_biomas)
 
-plot(geo_vetor_biomas$geom,
+    plot(geo_vetor_biomas$geom,
      col= c("darkgreen", "orange1","orange3","lightgreen",
             "yellow","purple4"),
      main= "Brazilian Biomes", axes = TRUE, graticule = TRUE)
 
-legend(x= -37, y=-20, pch=15, cex=.7, pt.cex=2.5,
+    legend(x= -37, y=-20, pch=15, cex=.7, pt.cex=2.5,
        legend =c("Amazon Rainforest","Caatinga","Cerrado","Atlantic Forest", "Pampa","Pantanal"),
        col = c("darkgreen", "orange1","orange3","lightgreen",
                  "yellow","purple4"))
 
 
-plot(geo_vetor_amazonia$geom,
+    plot(geo_vetor_amazonia$geom,
      col= c("Darkgreen"),
      main= "Amazon Rainforest", axes =TRUE, graticule= TRUE)
-legend(x=-20, y=-30, cex=.7, pt.cex = 2.5,
+    legend(x=-20, y=-30, cex=.7, pt.cex = 2.5,
        legend = c("Amazon Rainforest"),
        col = c("darkgreen"))
 
