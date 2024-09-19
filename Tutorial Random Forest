@@ -1,0 +1,350 @@
+#Teste raster_Avançado#
+
+Explorando os dados
+#Os dados próvem do satélite sentinels 2 em uma resolução de pixel de 20m, portanto, cada pixel corresponde a uma área de 20 por 20.
+#Em outra seção, será usado polígonos para poder classificar a cobertura de terra.
+
+# Check for packages and install if missing
+if(!"terra" %in% installed.packages()){install.packages("terra")}
+if(!"sf" %in% installed.packages()){install.packages("sf")}
+if(!"ranger" %in% installed.packages()){install.packages("ranger")}
+
+library(terra)
+library(sf)
+library(ranger)
+
+# Criando o diretório dos dados
+if (!dir.exists("data")) {
+  dir.create("data")
+}
+
+# Criando a saída do diretório
+if (!dir.exists("output")) {
+  dir.create("output")
+}
+
+# Download data and unzip
+download.file("https://github.com/GeoScripting-WUR/AdvancedRasterAnalysis/releases/download/advrast-data/AdvancedRaster.zip", "data/AdvancedRaster.zip")
+unzip("data/AdvancedRaster.zip", exdir="data")
+
+# Renomeando as camadas
+Gewata <- rast("data/S2B2A_T36NZP_20201227T075239_20m_gewata_crop.tif")
+names(Gewata) <- readLines("data/S2B2A_T36NZP_20201227T075239_20m_gewata_bands.txt")
+
+#Esse dado é cloud-free, então se adiciona uma "cloud mask layer" (retirando a camada de nuvens)
+Gewata <- subset(Gewata, "SCL", negate = TRUE)
+
+# Aqui é somente os testes dos atributos dos dados, nesse caso a
+Gewata$B02
+
+#class       : SpatRaster 
+#dimensions  : 1362, 2322, 1  (nrow, ncol, nlyr)
+#resolution  : 20, 20  (x, y)
+#extent      : 806780, 853220, 822240, 849480  (xmin, xmax, ymin, ymax)
+#coord. ref. : WGS 84 / UTM zone 36N (EPSG:32636) 
+#source      : S2B2A_T36NZP_20201227T075239_20m_gewata_crop.tif 
+#name        : B0
+
+
+global(Gewata$B02, fun = "max")$max #4466
+global(Gewata$B02, fun = "mean")$mean #320.8917
+
+# Máximo valor das três bandas.
+global(Gewata, fun = "max")$max # [1]  4466  5115  5365  4989  8790 10546  6982 14146 11008
+
+summary(Gewata$B02)
+# B02      
+#Min.   :  54  
+#1st Qu.: 248  
+#Median : 315  
+#Mean   : 321  
+#3rd Qu.: 387  
+#Max.   :4466
+
+#Histograma das bandas e um comparativo entre essas
+hist(Gewata, maxpixels = 1000)
+pairs(Gewata, maxpixels = 1000)
+
+#Question 1: In the case of the bands of the Gewata subset, list two pairs of bands that contain redundant information and two bands that have significant non-redundant information.
+#Redundância: B06 e B07; B12 e B04; #Non:redundante: B8A e B12
+
+par(mfrow = c(1, 1)) # reset plotting window
+ndvi <- app(c(Gewata$B8A, Gewata$B04), fun = function(x){(x[1] - x[2]) / (x[1] + x[2])})
+plot(ndvi)
+
+
+####Classificando os Raster####
+#Utilizando uma classificação supervisionada com o Random Forest. 
+#A utilização do sensoriamento remoto, uma parte difícil é a sua classificação.
+# Para a classificação, utilizamos várias bandas ( como o NDVI e seus principais componentes)
+# Random Forest:é um algortimo que junta métodos de apresendizagem tanto na classificação como na regressão.
+#No nosso caso o Random Forest 
+
+# Colocando na escala original
+gewata <- app(Gewata, fun = function(x) x / 10000)
+
+# Criando um novo SpatRaster, combinado os dados do Gewata e NDVI
+covs <- c(gewata, ndvi)
+plot(covs)
+
+#Nomeando a camada de NDVI
+names(covs) <- c(names(Gewata), "NDVI")
+names(covs)
+
+
+#Preparando a parte do treinanmento com polígonos, utilizando três parâmetros simples: forest, cropland e wetland.
+# Download training polygons
+download.file("https://github.com/GeoScripting-WUR/AdvancedRasterAnalysis/releases/download/advrast-data/trainingPoly.csv", "data/trainingPoly.csv")
+
+# Load the training polygons from a csv file using st_read:
+trainingPoly <- st_read("data/trainingPoly.csv")
+
+#adicionando os poígonos aos NDVI.
+plot(ndvi)
+plot(trainingPoly, add = TRUE)
+
+#Vendo o objeto "trainingPoly"
+plot(trainingPoly)
+trainingPoly <- trainingPoly[, c(2:4)]
+trainingPoly
+
+#A classe "Class" precisa ser transformada em um fator
+summary(trainingPoly$Class) #   Length     Class      Mode 
+                                  #16 character character 
+
+trainingPoly$Class <- as.factor(trainingPoly$Class)
+summary(trainingPoly$Class) #cropland   forest  wetland 
+                                  #6        5        5 
+#Criando um novo código, transfomrando essa coluna em numérico
+trainingPoly$Code <- as.numeric(trainingPoly$Class)
+summary(trainingPoly$Code) # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+                            #1.000   1.000   2.000   1.938   3.000   3.000 
+
+#Definindo a escala de cores em relação às classes e plontando o gráfico
+cols<- c("orange","dark green","light blue")
+plot(ndvi)
+plot(trainingPoly["Class"], add =TRUE, pal= cols)
+legend("right",cex= 0.5, legend = c("cropland","forest","wetland"), fill = cols, bg = "white")
+
+#Depois disso, queremos ter uma tabela com valores que representam todas as camadas conhecidas
+  #Primeiro, precisamos saber os valores covariados da localização dos polígonos, utilizando o comando extract()
+
+trainingData <- extract(covs, trainingPoly)
+trainingData$Class <- trainingPoly$Class[trainingData$ID]
+trainingData$ID <-NULL
+teste_trainingdata_1<- head(trainingData, n=10)
+teste_trainingdata_2<- tail(trainingData, n=10)
+
+#Temos nosso dataset de trainamento em data.frame com a classe de coluna como fator.
+#Agora temos dado que contém três classes definidas com valores para toda as covarições. Podemos visualizar isso por meio de histogramas:
+
+val_crop <-subset(trainingData, Class == "cropland")
+val_forest <-subset(trainingData, Class =="forest")
+val_wetland <- subset (trainingData, Class=="wetland")
+
+par(mfrow = c(3,1))
+hist(val_crop$NDVI,main = "cropland", xlab = "NDVI", xlim = c(0, 1), col = "orange")
+hist(val_forest$NDVI, main = "forest", xlab = "NDVI", xlim = c(0, 1), col = "dark green")
+hist(val_wetland$NDVI, main = "wetland", xlab = "NDVI", xlim = c(0, 1), col = "light blue")
+
+#Podemos criar um scatterplot para entender a organização das classes entre si
+plot(B8A ~ B11, data = val_crop, pch = ".", col = "orange", xlim = c(0, 0.4), ylim = c(0, 0.5))
+points(B8A ~ B11, data = val_forest, pch = ".", col = "dark green")
+points(B8A ~ B11, data = val_wetland, pch = ".", col = "light blue")
+legend("topright", cex = 1.0, legend = c("cropland", "forest", "wetland"), fill = c("orange", "dark green", "light blue"), bg = "white")
+
+#Tentando fazer a mesma coisa para B02~B05 e B07~NDVI
+plot(B02 ~ B05, data = val_crop, pch = ".", col = "orange", xlim = c(0, 0.4), ylim = c(0, 0.5))
+points(B02 ~ B05, data = val_forest, pch = ".", col = "dark green")
+points(B02 ~ B05, data = val_wetland, pch = ".", col = "light blue")
+
+plot(B07~NDVI,data = val_crop, pch = ".", col = "orange", xlim = c(0, 1.0), ylim = c(0, 0.5))
+points(B07 ~ NDVI, data = val_forest, pch = ".", col = "dark green")
+points(B07 ~ NDVI, data = val_wetland, pch = ".", col = "light blue")
+
+
+#### Utilizando o Random Forest na Classificação ####
+#Um ponto principal que não entendi foi sobre esses "covariates"
+
+#Nesse tópico, iremos criar um modelo baseado no training data, para poder predizer o tipo de vegetação;
+library(ranger)
+modelRF <-  ranger(x = trainingData[, 1:ncol(trainingData)-1], y = trainingData$Class, num.trees = 300,
+                   importance = "permutation", seed = 0xfedbeef)
+
+#O "modelRF" é um objeto do tipo ranger, que é um grande lity-type objeto packed com informações sobre o output do modelo.
+#Esses tipo de objeto pode ser chamado normalmente e podemo realizar teste estatísticos;
+modelRf
+class(modelRF)
+str(modelRF)
+names(modelRF)
+
+# Inspect the prediction error
+modelRF$prediction.error
+
+# Calculate the overall accuracy
+1 - modelRF$prediction.error
+
+# Inspect the confusion matrix of the OOB error assessment
+modelRF$confusion.matrix
+
+importance(modelRF)
+ 
+#Retirando o NDVI do modelRF
+trainingData$NDVI<- NULL
+trainingData2 <- trainingData
+modelRF2 <- ranger(x = trainingData2[, 1:ncol(trainingData)-1], y = trainingData$Class, num.trees = 300,
+importance = "permutation", seed = 0xfedbeef)
+
+class(modelRF2)
+str(modelRF2)
+names(modelRF2)
+
+# Inspect the prediction error
+modelRF2$prediction.error
+
+# Calculate the overall accuracy
+1 - modelRF2$prediction.error
+
+# Inspect the confusion matrix of the OOB error assessment
+modelRF2$confusion.matrix
+
+importance(modelRF)
+
+#Aplicar esse modelo na nossa imagem.
+names(trainingData)
+
+predLC <- predict(covs, modelRF, fun = function(...) predict(...)$predictions)
+
+par(mfrow = c(1,1))
+
+cropland=1
+forest=2
+wetland=3
+cols <- c("orange", "dark green", "light blue")
+plot(predLC, col = cols, legend = FALSE)
+legend("right", cex=0.6,
+       legend = c("cropland", "forest", "wetland"),
+       fill = cols, bg = "white")
+
+#### Aplicando um Raster sieve por identificando patches ####
+#Sieve?
+#Como o Random forest tem um número limite de classes e houve uma confusão entre cropland e wetland, ele pode ser útil para construir um forest mask.
+
+formask <- setValues(predLC, NA)
+
+# Assign 1 to formask to all cells corresponding to the forest class
+formask[predLC == 2] <- 1
+plot(formask, col = "dark green", legend = FALSE)
+
+#Usando o Queen´s case, baseado em 8 direções e nos seus adjacente.
+
+if(!file.exists(fn <-"output/clumformask.tif")){
+  forestpatches <-patches(formask, directions = 8, filename = fn)
+} else {
+  forestpatches <-rast(fn)
+}
+
+plot(forestpatches, col=topo.colors(nrow(forestpatches)))
+
+patchFreq <- freq(forestpatches)
+head(patchFreq)
+tail(patchFreq)
+
+#Podemos o patch com somente 1 pixel; São chamados de "ilha" de pixels que podemos remover da forest mask original;
+
+#Essa parte eu não entendi:
+#Quais linhas só são representados por uma linha?
+str(which(patchFreq$count == 1))
+
+# Quais valores correspondem a tal?
+str(patchFreq$value[which(patchFreq$count == 1)])
+
+# Colocando em um vetor ID e criando um mask a ser sieved? O que seria esse mask? e o sieved?
+
+excludeID <- patchFreq$value[which(patchFreq$count == 1)]
+
+formaskSieve <- formask
+
+formaskSieve[forestpatches %in% excludeID] <- NA
+
+## Zoom in to a small extent to check the results
+# Note: you can also define your own zoom by using e <- drawExtent()
+e <- ext(c(830000, 834000, 830000, 834000))
+par(mfrow = c(1, 2)) # allow 2 plots side-by-side
+plot(formask, ext = e, col="dark green", legend = FALSE, main = 'formask')
+plot(formaskSieve, ext = e, col="dark green", legend = FALSE, main = 'formaskSieve')
+
+#Question 6: How could you adjust the above sieve to remove all forest pixels with an area below 0.5 hectares? Consider the fact that the pixels in formask are 20m by 20m (see res(formask)), and that one hectare is equal to 10000m2.
+
+#### Trabalhando com Raster temáticos ####
+#Os valores do Random Forest precisam ser categóricos e não quantitativos.
+#Nessa parte, usamos dados do "lulcGewata" que tem dados de Land Cover e Land Use.
+
+par(mfrow= c(1,1))
+download.file("https://github.com/GeoScripting-WUR/AdvancedRasterAnalysis/releases/download/thematic-data/lulcGewata.zip", "data/lulcGewata.zip")
+unzip("data/lulcGewata.zip", exdir = "data")
+
+lulcGewata <- rast("data/lulcGewata.tif")
+
+hist(lulcGewata)
+
+#Esse é um dado raster entre 1 a 6, mas precisamos saber as suas classes.
+LUTGewata <- read.csv("data/LUTGewata.csv")
+LUTGewata[[1]]<-NULL
+LUTGewata #  ID             Class
+          #1  1          cropland
+          #2  2            bamboo
+          #3  3         bare soil
+          #4  4 coffee plantation
+          #5  5            forest
+          #6  6           wetland
+
+  #Com esses dados, nós sabemos as classes possíveis do Raster e os valores dados ao lucl Raster (ID)
+
+
+#Podemos, também, gerar atributos a essa tabela raster
+lucl <- as.factor(lulcGewata)
+
+levels(lucl) <-LUTGewata
+lucl
+
+
+#As vezes, podemos querer ver cada uma das classes separadamente. Para isso, usamos o comando segregate();
+classes<- segregate(lucl)
+
+names(classes)<- LUTGewata$Class
+
+plot(classes, legend=FALSE)
+
+#Por fim, se queremos diferenciar cada pixel por 0 ou 1, para criar um Forest mask, podemos fazer o mesmo, mas estabelecendo que 0=NA;
+
+forest<- subset(classes, 5)
+
+forest<- classes[[5]]
+
+forest<- classes$forest
+
+forest[forest==0]<- NA
+
+plot(forest, legend=FALSE, col="dark green")
+
+
+#### Conclusão do tutorial ####
+
+##Sessão Data exploration##
+#Foi a utilização de comandos hist(), pairs() e app() para um SpatRaster
+
+##Training data preparation##
+# comando extract(): reaver um valor do raster abaixo para um vetor (polígono, linha ou ponto)
+
+## Contruindo um modelo do Random Forest ##
+# ranger(): 
+
+##Run a model on the data##:
+# precict():
+
+## Aplicando um Raster sieve ao identificar patches ##
+# setvalues(), patches(), freq()
+
+##Working with thematic Rasters##
+# segregate().
